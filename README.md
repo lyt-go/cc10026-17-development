@@ -16,6 +16,7 @@
 │   └── vite.config.ts        dev server 配置（open: false）
 ├── backend/                  FastAPI（Python） 后端
 │   ├── app/routers/resource.py  通用查询/导出/登记/动作接口
+│   ├── app/routers/field_handover.py  格式字段映射交接（固定前缀路由，先于通用路由注册）
 │   ├── app/services/<key>.py    每个模块独立领域逻辑
 │   ├── app/services/base.py     共享服务骨架
 │   └── app/store.py          内存数据仓库与示例数据
@@ -60,6 +61,7 @@ npm run dev
 | 字段脱敏 | `field_mask` | 脱敏规则 | 规则编号、目标字段、脱敏算法 |
 | SLA监控 | `sla_monitor` | SLA指标 | 指标编号、关联API、可用率目标 |
 | 结果格式化 | `result_format` | 格式模板 | 模板编号、关联API、输出格式 |
+| 字段映射交接 | `field_handover` | 格式字段映射交接表 | 交接编号、来源列、旧/新模板字段、规则引用、启用判断 |
 | 查询优化 | `query_optimize` | 优化规则 | 规则编号、关联API、索引建议 |
 | 异常归类 | `error_classify` | 异常类型 | 类型编号、类型名称、错误码段 |
 | 数据归并 | `data_merge` | 归并规则 | 规则编号、主API、从API |
@@ -76,6 +78,23 @@ npm run dev
   `frontend/src/domain/<模块>.ts`，用于承载真实业务差异并维持36题位容量。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+
+## 格式字段映射交接（模板换版）
+
+模板从 V1.0 换到 V2.0 时，`field_handover` 模块输出可回溯的字段映射交接表，
+并强制"先核对、再确认、后改规则"的顺序（见 `backend/app/services/field_handover.py`）：
+
+- 交接行逐列记录 `来源列 → 旧模板字段 → 新模板字段`，并带新旧模板编号/版本、
+  `version_compat` 版本映射编号、`data_filter#id` 规则出处。
+- 两个来源列在新模板同属一个基础名（如 `净额(优惠抵扣)`、`净额(实收)`）会归入同一
+  别名冲突组；组内两个有效规则引用都保留，确认归属前禁止修订或启用。
+- 未确认的引用不会触发任何生产规则改动；`POST /api/field-handover/revise-rule`
+  是改写过滤字段的唯一入口，且对未登记引用、未确认冲突一律拒绝。
+- `GET /api/field-handover/rehearse` 用同一批原样本给出三种落点：
+  A 当前生产、B 直接启用新映射而规则未改（暴露空值/失效风险）、C 规则修订后；
+  三情形均从交接登记的引用推导，规则修订前后结果保持一致。
+- 交接表与预演结果可分别从 `/api/field-handover/handover/export`、
+  `/api/field-handover/rehearse/export` 下载带 BOM 的 CSV。
 
 领域：数据工程
 子方向：数据分析与数据应用
